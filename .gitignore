@@ -21,6 +21,11 @@ BACKEND/models/*/*
 
 # Local settings
 .env
+runtime/
+FRONT/.desktop-data/
+BACKEND/models/**/*.bin
+BACKEND/models/**/*.gguf
+BACKEND/models/**/*.safetensors
 .DS_Store
 FRONT/.desktop-env/
 FRONT/.desktop-data/

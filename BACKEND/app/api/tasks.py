@@ -22,9 +22,11 @@ def update_task(meeting_id: int, task_id: int, payload: TaskUpdate, db: Session 
     task = db.get(Task, task_id)
     if not task or task.meeting_id != meeting_id:
         raise HTTPException(status_code=404, detail="Task not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    values = payload.model_dump(exclude_unset=True)
+    if "status" in values and values["status"] not in TaskUpdate.allowed_statuses():
+        raise HTTPException(status_code=422, detail="Status must be open, confirmed or done")
+    for field, value in values.items():
         setattr(task, field, value)
     db.commit()
     db.refresh(task)
     return task
-

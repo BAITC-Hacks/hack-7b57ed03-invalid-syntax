@@ -38,6 +38,7 @@ class Participant(Base):
     meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"), index=True)
     speaker_label: Mapped[str] = mapped_column(String(80))
     display_name: Mapped[str] = mapped_column(String(240))
+    role: Mapped[str | None] = mapped_column(String(300), nullable=True)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     meeting: Mapped[Meeting] = relationship(back_populates="participants")
 
@@ -49,9 +50,11 @@ class TranscriptSegment(Base):
     meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"), index=True)
     speaker_label: Mapped[str] = mapped_column(String(80))
     speaker_name: Mapped[str] = mapped_column(String(240))
+    speaker_role: Mapped[str | None] = mapped_column(String(300), nullable=True)
     start: Mapped[float] = mapped_column(Float)
     end: Mapped[float] = mapped_column(Float)
     text: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
     meeting: Mapped[Meeting] = relationship(back_populates="transcript")
 
 
@@ -77,7 +80,10 @@ class Summary(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"), unique=True)
     topic: Mapped[str] = mapped_column(Text)
+    summary_text: Mapped[str] = mapped_column(Text, default="")
     key_points_json: Mapped[str] = mapped_column(Text, default="[]")
     problems_json: Mapped[str] = mapped_column(Text, default="[]")
     decisions_json: Mapped[str] = mapped_column(Text, default="[]")
+    risks_json: Mapped[str] = mapped_column(Text, default="[]")
+    metrics_json: Mapped[str] = mapped_column(Text, default="[]")
     meeting: Mapped[Meeting] = relationship(back_populates="summary")

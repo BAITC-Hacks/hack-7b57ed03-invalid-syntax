@@ -21,9 +21,12 @@ class MeetingService:
         if meeting.summary:
             summary = SummaryRead(
                 topic=meeting.summary.topic,
+                summary_text=meeting.summary.summary_text,
                 key_points=json.loads(meeting.summary.key_points_json),
                 problems=json.loads(meeting.summary.problems_json),
                 decisions=json.loads(meeting.summary.decisions_json),
+                risks=json.loads(meeting.summary.risks_json),
+                metrics=json.loads(meeting.summary.metrics_json),
                 tasks=[task.id for task in meeting.tasks],
             )
         return MeetingRead.model_validate(
@@ -42,4 +45,3 @@ class MeetingService:
                 "summary": summary,
             }
         )
-

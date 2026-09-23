@@ -1,4 +1,3 @@
-import shutil
 from pathlib import Path
 from uuid import uuid4
 
@@ -46,9 +45,14 @@ def create_meeting(payload: MeetingCreate, db: Session = Depends(get_db)):
 def upload_media(meeting_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
     meeting = get_meeting_or_404(db, meeting_id)
     suffix = Path(file.filename or "recording").suffix.lower()
-    allowed = {".mp3", ".wav", ".m4a", ".ogg", ".mp4", ".mov", ".webm", ".mkv"}
+    allowed = {".flac", ".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".ogg", ".wav", ".webm"}
     if suffix not in allowed:
-        raise HTTPException(status_code=415, detail="Supported formats: mp3, wav, m4a, ogg, mp4, mov, webm, mkv")
+        raise HTTPException(status_code=415, detail="Поддерживаются: FLAC, MP3, MP4, MPEG, MPGA, M4A, OGG, WAV, WEBM")
+    if file.content_type and not (
+        file.content_type.startswith("audio/") or file.content_type.startswith("video/")
+        or file.content_type in {"application/octet-stream", "application/ogg"}
+    ):
+        raise HTTPException(status_code=415, detail="Файл не распознан как аудио или видео")
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     target = settings.upload_dir / f"{meeting_id}_{uuid4().hex}{suffix}"
     size = 0

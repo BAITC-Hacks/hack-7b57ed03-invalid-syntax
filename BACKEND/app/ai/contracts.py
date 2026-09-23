@@ -9,6 +9,7 @@ class SpeechSegment:
     start: float
     end: float
     text: str
+    confidence: float = 0.0
 
 
 @dataclass
@@ -25,6 +26,9 @@ class MergedSegment:
     speaker_label: str
     speaker_name: str
     text: str
+    speaker_role: str | None = None
+    speaker_confidence: float = 0.0
+    confidence: float = 0.0
 
 
 @dataclass
@@ -41,9 +45,12 @@ class ExtractedTask:
 @dataclass
 class GeneratedSummary:
     topic: str
+    summary_text: str
     key_points: list[str]
     problems: list[str]
     decisions: list[str]
+    risks: list[str] | None = None
+    metrics: list[str] | None = None
 
 
 class SpeechToTextProvider(Protocol):
@@ -60,4 +67,3 @@ class TaskExtractionProvider(Protocol):
 
 class SummarizationProvider(Protocol):
     def summarize(self, transcript: list[MergedSegment], tasks: list[ExtractedTask]) -> GeneratedSummary: ...
-

@@ -33,11 +33,13 @@ class ParticipantRead(BaseModel):
     id: int
     speaker_label: str
     display_name: str
+    role: str | None = None
     confidence: float
 
 
 class ParticipantUpdate(BaseModel):
-    display_name: str = Field(min_length=1, max_length=240)
+    display_name: str | None = Field(default=None, min_length=1, max_length=240)
+    role: str | None = Field(default=None, max_length=300)
 
 
 class TranscriptRead(BaseModel):
@@ -45,9 +47,11 @@ class TranscriptRead(BaseModel):
     id: int
     speaker_label: str
     speaker_name: str
+    speaker_role: str | None = None
     start: float
     end: float
     text: str
+    confidence: float = 0.0
 
 
 class TaskRead(BaseModel):
@@ -70,12 +74,19 @@ class TaskUpdate(BaseModel):
     deadline_normalized: date | None = None
     status: str | None = None
 
+    @classmethod
+    def allowed_statuses(cls) -> set[str]:
+        return {"open", "confirmed", "done"}
+
 
 class SummaryRead(BaseModel):
     topic: str
+    summary_text: str
     key_points: list[str]
     problems: list[str]
     decisions: list[str]
+    risks: list[str] = Field(default_factory=list)
+    metrics: list[str] = Field(default_factory=list)
     tasks: list[int]
 
 
@@ -96,4 +107,3 @@ class ProcessResponse(BaseModel):
     meeting_id: int
     status: str
     message: str
-

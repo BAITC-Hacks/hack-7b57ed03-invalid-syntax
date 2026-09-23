@@ -32,7 +32,8 @@ class ProcessingService:
                     repo.save(current)
 
             pipeline = MeetingProcessingPipeline(update)
-            transcript, tasks, summary = pipeline.run(Path(meeting.source_path), meeting.meeting_date)
+            result = pipeline.run(Path(meeting.source_path), meeting.meeting_date)
+            transcript, tasks, summary = result.transcript, result.tasks, result.summary
             meeting = repo.get(meeting_id, with_relations=True)
             if not meeting:
                 return
@@ -44,21 +45,25 @@ class ProcessingService:
                 db.delete(meeting.summary)
             db.flush()
 
-            participant_names: dict[str, str] = {}
+            participant_names: dict[str, tuple[str, str | None, float]] = {}
             for segment in transcript:
-                participant_names[segment.speaker_label] = segment.speaker_name
+                participant_names[segment.speaker_label] = (
+                    segment.speaker_name, segment.speaker_role, segment.speaker_confidence
+                )
                 meeting.transcript.append(
                     TranscriptSegment(
                         speaker_label=segment.speaker_label,
                         speaker_name=segment.speaker_name,
+                        speaker_role=segment.speaker_role,
                         start=segment.start,
                         end=segment.end,
                         text=segment.text,
+                        confidence=segment.confidence,
                     )
                 )
-            for label, name in participant_names.items():
+            for label, (name, role, confidence) in participant_names.items():
                 meeting.participants.append(
-                    Participant(speaker_label=label, display_name=name, confidence=0.91)
+                    Participant(speaker_label=label, display_name=name, role=role, confidence=confidence)
                 )
             for item in tasks:
                 meeting.tasks.append(
@@ -72,15 +77,19 @@ class ProcessingService:
                         confidence=item.confidence,
                     )
                 )
-            meeting.summary = Summary(
-                topic=summary.topic,
-                key_points_json=json.dumps(summary.key_points, ensure_ascii=False),
-                problems_json=json.dumps(summary.problems, ensure_ascii=False),
-                decisions_json=json.dumps(summary.decisions, ensure_ascii=False),
-            )
-            meeting.status = "completed"
-            meeting.stage = "completed"
+            if summary:
+                meeting.summary = Summary(
+                    topic=summary.topic, summary_text=summary.summary_text,
+                    key_points_json=json.dumps(summary.key_points, ensure_ascii=False),
+                    problems_json=json.dumps(summary.problems, ensure_ascii=False),
+                    decisions_json=json.dumps(summary.decisions, ensure_ascii=False),
+                    risks_json=json.dumps(summary.risks or [], ensure_ascii=False),
+                    metrics_json=json.dumps(summary.metrics or [], ensure_ascii=False),
+                )
+            meeting.status = "partial" if result.warnings else "completed"
+            meeting.stage = "completed_with_warnings" if result.warnings else "completed"
             meeting.progress = 100
+            meeting.error = "\n".join(result.warnings) or None
             repo.save(meeting)
         except Exception as exc:
             db.rollback()
@@ -92,4 +101,3 @@ class ProcessingService:
                 repo.save(failed)
         finally:
             db.close()
-

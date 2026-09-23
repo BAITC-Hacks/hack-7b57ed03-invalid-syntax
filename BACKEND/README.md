@@ -1,20 +1,22 @@
-# BACKEND
+# ALEM BACKEND
 
-FastAPI + SQLAlchemy сервер. Все AI-компоненты находятся только в `app/ai` и подключаются через протоколы провайдеров, поэтому mock-реализации можно независимо заменить на faster-whisper, pyannote и локальную LLM.
-
-## Запуск
+FastAPI/SQLite backend со встроенным web-интерфейсом. Основной запуск выполняется из корня:
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-copy .env.example .env
-uvicorn app.main:app --reload
+python main.py
 ```
 
-Swagger: http://localhost:8000/docs. Для реального inference установите `MOCK_MODE=false` после подключения реализаций провайдеров. Пока при этом API явно вернёт ошибку конфигурации, а не отправит данные наружу.
+При наличии `OPENAI_API_KEY` основной pipeline использует официальный OpenAI SDK,
+`gpt-4o-transcribe-diarize` и Structured Outputs. Без ключа автоматически включается явно
+обозначенный DEMO mode. Настройки можно положить в `BACKEND/.env`; пример — `.env.example`.
 
-## Pipeline
+Старый локальный pipeline доступен через `AI_PROVIDER=local`: модели находятся в
+`models/whisper`, `models/diarization`, `models/llm`. Текущий режим показывает `/health`.
 
-`MeetingProcessingPipeline` публикует стадии и прогресс: загрузка, подготовка аудио, STT, diarization, объединение, mapping, поручения, сроки, summary, сохранение, протокол. Обработка запускается как фоновая задача FastAPI; для production worker можно заменить на Celery/RQ без изменения API.
+Для тестов `tests/conftest.py` явно включает mock:
 
+```bash
+python -m pytest -q
+```
+
+Интерфейс раздаётся из `app/web/`. Схема SQLite расширяется только additive-миграциями без удаления пользовательских данных.

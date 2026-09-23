@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101b17">
+  <title>Aqylman — автопротокол совещаний</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Aqylman">
+      <span class="brand-mark">A</span>
+      <span><strong>Aqylman</strong><small>Meeting Intelligence</small></span>
+    </a>
+    <div class="header-actions">
+      <div id="modePill" class="mode-pill mode-loading"><span></span> Проверка режима…</div>
+      <button id="newMeetingButton" class="button button-ghost" type="button">＋ Новое совещание</button>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">АВТОПРОТОКОЛ СОВЕЩАНИЙ</p>
+        <h1>От записи до готового<br><em>протокола</em></h1>
+        <p class="hero-copy">Транскрипт со спикерами, решения, поручения и дедлайны — в одном аккуратном документе.</p>
+      </div>
+      <div class="hero-stat">
+        <span>01</span>
+        <p>Загрузите запись.<br>Остальное сделает Aqylman.</p>
+      </div>
+    </section>
+
+    <div id="modeNotice" class="notice notice-demo hidden"></div>
+    <div id="errorPanel" class="notice notice-error hidden" role="alert">
+      <strong>Не удалось выполнить операцию.</strong>
+      <span id="errorText"></span>
+      <button id="closeError" type="button" aria-label="Закрыть">×</button>
+    </div>
+
+    <div class="app-grid">
+      <aside class="history-panel">
+        <div class="section-heading">
+          <div><p class="eyebrow">АРХИВ</p><h2>Совещания</h2></div>
+          <button id="refreshMeetings" class="icon-button" type="button" title="Обновить">↻</button>
+        </div>
+        <div id="meetingList" class="meeting-list">
+          <div class="empty-small">Загрузка…</div>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <div id="createView" class="view active">
+          <div class="card upload-card">
+            <div class="step-number">01</div>
+            <div class="card-title"><p class="eyebrow">НОВОЕ СОВЕЩАНИЕ</p><h2>Добавьте запись</h2></div>
+
+            <form id="meetingForm">
+              <div class="form-row">
+                <label>Название совещания
+                  <input id="meetingTitle" name="title" required minlength="2" maxlength="240" placeholder="Например, Статус проекта за сентябрь">
+                </label>
+                <label>Дата
+                  <input id="meetingDate" name="meeting_date" type="date" required>
+                </label>
+              </div>
+
+              <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Загрузить аудио или видео">
+                <input id="mediaFile" type="file" hidden accept=".flac,.mp3,.mp4,.mpeg,.mpga,.m4a,.ogg,.wav,.webm,audio/*,video/mp4,video/webm">
+                <div class="upload-icon">↥</div>
+                <h3 id="dropTitle">Перетащите запись сюда</h3>
+                <p id="dropSubtitle">или нажмите, чтобы выбрать файл</p>
+                <div class="format-tags"><span>MP3</span><span>WAV</span><span>M4A</span><span>MP4</span><span>до 25 МБ</span></div>
+              </div>
+
+              <button id="startButton" class="button button-primary button-wide" type="submit" disabled>
+                <span>Начать обработку</span><b>→</b>
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div id="processingView" class="view">
+          <div class="card process-card">
+            <p class="eyebrow">ОБРАБОТКА</p>
+            <h2 id="processingTitle">Готовим протокол</h2>
+            <p id="processingFile" class="muted"></p>
+            <div class="progress-head"><span id="progressStage">Загрузка файла</span><strong id="progressValue">0%</strong></div>
+            <div class="progress-track"><div id="progressBar"></div></div>
+            <ol id="progressSteps" class="progress-steps">
+              <li data-key="upload"><i></i><span>Загрузка файла</span></li>
+              <li data-key="speech"><i></i><span>Распознавание речи</span></li>
+              <li data-key="speakers"><i></i><span>Определение спикеров</span></li>
+              <li data-key="analysis"><i></i><span>Анализ поручений и решений</span></li>
+              <li data-key="protocol"><i></i><span>Формирование протокола</span></li>
+              <li data-key="done"><i></i><span>Готово</span></li>
+            </ol>
+          </div>
+        </div>
+
+        <div id="resultView" class="view">
+          <div class="result-header">
+            <div><p class="eyebrow">ГОТОВЫЙ ПРОТОКОЛ</p><h2 id="resultTitle">Совещание</h2><p id="resultMeta" class="muted"></p></div>
+            <div class="export-actions">
+              <a id="downloadDocx" class="button button-secondary" href="#">Скачать DOCX</a>
+              <a id="downloadPdf" class="button button-dark" href="#">Скачать PDF</a>
+            </div>
+          </div>
+
+          <nav id="resultTabs" class="tabs" aria-label="Разделы протокола">
+            <button class="active" data-tab="overview">Обзор</button>
+            <button data-tab="tasks">Поручения <span id="taskCount">0</span></button>
+            <button data-tab="participants">Участники</button>
+            <button data-tab="transcript">Транскрипт</button>
+            <button data-tab="protocol">Протокол</button>
+          </nav>
+
+          <div id="overviewTab" class="tab-panel active"></div>
+          <div id="tasksTab" class="tab-panel"></div>
+          <div id="participantsTab" class="tab-panel"></div>
+          <div id="transcriptTab" class="tab-panel"></div>
+          <div id="protocolTab" class="tab-panel"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

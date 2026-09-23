@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.meeting import Participant, TranscriptSegment
+from app.models.meeting import Participant, Task, TranscriptSegment
 from app.repositories.meeting_repository import MeetingRepository
 from app.schemas.meeting import ParticipantRead, ParticipantUpdate
 
@@ -25,13 +25,24 @@ def update_participant(
     if not participant or participant.meeting_id != meeting_id:
         raise HTTPException(status_code=404, detail="Participant not found")
     old_name = participant.display_name
-    participant.display_name = payload.display_name
+    if payload.display_name is not None:
+        participant.display_name = payload.display_name
+    if "role" in payload.model_fields_set:
+        participant.role = payload.role.strip() if payload.role else None
     for segment in db.query(TranscriptSegment).filter(
         TranscriptSegment.meeting_id == meeting_id,
         TranscriptSegment.speaker_label == participant.speaker_label,
     ):
-        segment.speaker_name = payload.display_name
+        if payload.display_name is not None:
+            segment.speaker_name = payload.display_name
+        if "role" in payload.model_fields_set:
+            segment.speaker_role = participant.role
+    if payload.display_name is not None and old_name != payload.display_name:
+        for task in db.query(Task).filter(Task.meeting_id == meeting_id):
+            if task.responsible == old_name:
+                task.responsible = payload.display_name
+            if task.assigned_by == old_name:
+                task.assigned_by = payload.display_name
     db.commit()
     db.refresh(participant)
     return participant
-

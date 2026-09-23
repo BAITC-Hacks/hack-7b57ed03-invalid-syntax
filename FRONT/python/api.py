@@ -61,9 +61,9 @@ class Api:
     def task(self, meeting_id, task_id, values):
         return self.request('PATCH', f'/api/v1/meetings/{meeting_id}/tasks/{task_id}', json=values).json()
 
-    def participant(self, meeting_id, participant_id, name):
+    def participant(self, meeting_id, participant_id, values):
         return self.request('PATCH', f'/api/v1/meetings/{meeting_id}/participants/{participant_id}',
-                            json={'display_name': name.strip()}).json()
+                            json=values).json()
 
     def media_url(self, meeting_id):
         return f'{self.base}/api/v1/meetings/{meeting_id}/media'

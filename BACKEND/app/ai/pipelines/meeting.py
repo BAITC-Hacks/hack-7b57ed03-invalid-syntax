@@ -1,103 +1,151 @@
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
+import tempfile
 
-from app.ai.contracts import MergedSegment
+from app.ai.audio.audio_processor import AudioProcessor
+from app.ai.contracts import GeneratedSummary, MergedSegment
+from app.ai.errors import AIError
+from app.ai.model_manager import model_manager
 from app.ai.providers.mock import MockAIProvider
+from app.ai.providers.openai_provider import OpenAIMeetingProvider
+from app.ai.speaker_mapping.mapper import contextual_speaker_mapping
 from app.core.config import settings
-
 
 ProgressCallback = Callable[[str, int], None]
 
 
-class MeetingProcessingPipeline:
-    """Orchestrates providers without coupling the API layer to ML libraries."""
+@dataclass
+class PipelineResult:
+    transcript: list[MergedSegment]
+    tasks: list
+    summary: GeneratedSummary | None
+    warnings: list[str]
 
-    def __init__(self, progress: ProgressCallback, provider: MockAIProvider | None = None):
-        if not settings.mock_mode and provider is None:
-            raise RuntimeError(
-                "Локальная модель распознавания речи не найдена. "
-                "Проверьте папку BACKEND/models/whisper или включите MOCK_MODE=true."
-            )
+
+class MeetingProcessingPipeline:
+    def __init__(self, progress: ProgressCallback, provider=None):
         self.progress = progress
-        self.provider = provider or MockAIProvider()
+        self.mode = settings.ai_mode
+        self.provider = provider
+        if self.provider is None and self.mode == "demo":
+            self.provider = MockAIProvider()
+        self.audio_processor = AudioProcessor()
 
     def validate_file(self, source: Path) -> Path:
         self.progress("file_validation", 5)
-        if not source.exists() or source.stat().st_size == 0:
-            raise ValueError("Uploaded file is empty or unavailable")
-        allowed = {".mp3", ".wav", ".m4a", ".ogg", ".mp4", ".mov", ".webm", ".mkv"}
-        if source.suffix.lower() not in allowed:
-            raise ValueError(f"Unsupported media type: {source.suffix}")
+        allowed = {".flac", ".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".ogg", ".wav", ".webm"}
+        if not source.is_file() or source.stat().st_size == 0:
+            raise AIError("FILE_INVALID: Файл пуст или недоступен.")
+        if source.suffix.casefold() not in allowed:
+            raise AIError(f"FILE_INVALID: Неподдерживаемый формат {source.suffix}.")
+        if source.stat().st_size > settings.max_upload_mb * 1024 * 1024:
+            raise AIError(f"FILE_TOO_LARGE: Максимальный размер файла — {settings.max_upload_mb} МБ.")
+        if self.mode == "local":
+            self.audio_processor.validate_media(source)
         return source
 
-    def extract_audio(self, source: Path) -> Path:
-        self.progress("audio_extraction", 12)
-        if source.suffix.lower() in {".mp4", ".mov", ".webm", ".mkv"}:
-            # Mock mode intentionally keeps the original file. A production adapter
-            # will invoke ffmpeg and return a normalized WAV path here.
+    def prepare_audio(self, source: Path, workdir: Path) -> Path:
+        self.progress("audio_extraction", 10)
+        if self.mode != "local":
             return source
-        return source
-
-    def preprocess_audio(self, audio: Path) -> Path:
         self.progress("audio_preprocessing", 20)
-        return audio
+        return self.audio_processor.normalize_audio(source, workdir / "normalized.wav")
 
-    def transcribe(self, audio: Path):
-        self.progress("speech_to_text", 36)
-        return self.provider.transcribe(audio)
-
-    def diarize(self, audio: Path):
-        self.progress("speaker_diarization", 48)
-        return self.provider.diarize(audio)
-
-    def merge_stt_and_diarization(self, speech, turns) -> list[MergedSegment]:
-        self.progress("merge_transcript", 56)
-        merged: list[MergedSegment] = []
+    @staticmethod
+    def merge_stt_and_diarization(speech, turns) -> list[MergedSegment]:
+        merged = []
         for segment in speech:
-            midpoint = (segment.start + segment.end) / 2
-            turn = next((item for item in turns if item.start <= midpoint <= item.end), turns[0])
+            overlaps: dict[str, float] = {}
+            for turn in turns:
+                overlap = max(0.0, min(segment.end, turn.end) - max(segment.start, turn.start))
+                if overlap:
+                    overlaps[turn.speaker] = overlaps.get(turn.speaker, 0.0) + overlap
+            label = max(overlaps, key=overlaps.get) if overlaps else "Speaker_01"
             merged.append(
-                MergedSegment(segment.start, segment.end, turn.speaker, turn.speaker, segment.text)
+                MergedSegment(
+                    start=segment.start,
+                    end=segment.end,
+                    speaker_label=label,
+                    speaker_name=label,
+                    text=segment.text,
+                    confidence=segment.confidence,
+                )
             )
         return merged
 
-    def identify_speakers(self, transcript: list[MergedSegment]) -> list[MergedSegment]:
-        self.progress("speaker_mapping", 64)
-        names = {"Speaker_01": "Асхат Ерланович", "Speaker_02": "Гульмира Сериковна"}
-        for segment in transcript:
-            segment.speaker_name = names.get(segment.speaker_label, segment.speaker_label)
-        return transcript
+    def _run_demo(self, source: Path, meeting_date: date) -> PipelineResult:
+        provider = self.provider or MockAIProvider()
+        self.progress("speech_to_text", 25)
+        speech = provider.transcribe(source)
+        self.progress("speaker_diarization", 55)
+        turns = provider.diarize(source)
+        self.progress("merge_transcript", 70)
+        transcript = contextual_speaker_mapping(self.merge_stt_and_diarization(speech, turns))
+        self.progress("task_extraction", 82)
+        tasks = provider.extract(transcript, meeting_date)
+        self.progress("summarization", 94)
+        summary = provider.summarize(transcript, tasks)
+        self.progress("saving_results", 98)
+        return PipelineResult(transcript, tasks, summary, [])
 
-    def extract_tasks(self, transcript, meeting_date):
-        self.progress("task_extraction", 75)
-        return self.provider.extract(transcript, meeting_date)
+    def _run_openai(self, source: Path, meeting_date: date) -> PipelineResult:
+        provider = self.provider or OpenAIMeetingProvider()
+        self.progress("speech_to_text", 20)
+        transcript = provider.transcribe_and_diarize(source)
+        self.progress("speaker_diarization", 65)
+        self.progress("task_extraction", 78)
+        tasks, summary = provider.analyze(transcript, meeting_date)
+        self.progress("summarization", 94)
+        self.progress("saving_results", 98)
+        return PipelineResult(transcript, tasks, summary, [])
 
-    def normalize_deadlines(self, tasks):
-        self.progress("deadline_normalization", 81)
-        return tasks
+    def _run_local(self, source: Path, meeting_date: date) -> PipelineResult:
+        warnings: list[str] = []
+        with tempfile.TemporaryDirectory(prefix="alem-") as temp:
+            audio = self.prepare_audio(source, Path(temp))
+            self.progress("speech_to_text", 25)
+            speech = model_manager.stt().transcribe(audio)
+            self.progress("speech_to_text", 50)
+            self.progress("speaker_diarization", 55)
+            try:
+                turns = model_manager.diarization().diarize(audio)
+            except AIError as exc:
+                turns = []
+                warnings.append(str(exc) + " Транскрипт сохранён без надёжного разделения спикеров.")
+            self.progress("merge_transcript", 70)
+            transcript = self.merge_stt_and_diarization(speech, turns)
+            self.progress("speaker_mapping", 75)
+            try:
+                llm = model_manager.llm()
+                transcript = llm.map_speakers(transcript)
+            except AIError as exc:
+                llm = None
+                transcript = contextual_speaker_mapping(transcript)
+                warnings.append(str(exc) + " Имена можно исправить вручную.")
+            self.progress("task_extraction", 82)
+            tasks = []
+            summary = None
+            if llm:
+                try:
+                    tasks = llm.extract(transcript, meeting_date)
+                except AIError as exc:
+                    warnings.append(str(exc) + " Транскрипт сохранён.")
+                self.progress("summarization", 94)
+                try:
+                    summary = llm.summarize(transcript, tasks)
+                except AIError as exc:
+                    warnings.append(str(exc) + " Транскрипт сохранён.")
+            self.progress("saving_results", 98)
+            return PipelineResult(transcript, tasks, summary, warnings)
 
-    def generate_summary(self, transcript, tasks):
-        self.progress("summarization", 88)
-        return self.provider.summarize(transcript, tasks)
-
-    def generate_protocol(self) -> None:
-        self.progress("protocol_generation", 97)
-
-    def run(self, source: Path, meeting_date):
+    def run(self, source: Path, meeting_date: date) -> PipelineResult:
         source = self.validate_file(source)
-        audio = self.extract_audio(source)
-        audio = self.preprocess_audio(audio)
-        speech = self.transcribe(audio)
-        turns = self.diarize(audio)
-        transcript = self.merge_stt_and_diarization(speech, turns)
-        transcript = self.identify_speakers(transcript)
-        tasks = self.extract_tasks(transcript, meeting_date)
-        tasks = self.normalize_deadlines(tasks)
-        summary = self.generate_summary(transcript, tasks)
-        self.progress("saving_results", 93)
-        self.generate_protocol()
-        return transcript, tasks, summary
-
+        if self.mode == "openai":
+            return self._run_openai(source, meeting_date)
+        if self.mode == "local":
+            return self._run_local(source, meeting_date)
+        return self._run_demo(source, meeting_date)

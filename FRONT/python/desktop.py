@@ -27,9 +27,20 @@ from jobs import Jobs
 BASE = Path(__file__).resolve().parent
 DATA = BASE.parent / '.desktop-data'
 STATES = {'created': 'Черновик', 'uploaded': 'Запись загружена', 'processing': 'Обработка',
-          'completed': 'Готово', 'failed': 'Ошибка'}
-TASK_STATES = {'open': 'На проверке', 'confirmed': 'Проверено', 'done': 'Выполнено'}
+          'completed': 'Готово', 'partial': 'Готово с предупреждениями', 'failed': 'Ошибка'}
+TASK_STATES = {'open': 'В работе', 'confirmed': 'Проверено', 'done': 'Выполнено'}
 FORMATS = 'Аудио и видео (*.mp3 *.wav *.m4a *.ogg *.mp4 *.mov *.webm *.mkv)'
+
+
+def task_state(task):
+    deadline = task.get('deadline_normalized')
+    if task.get('status') != 'done' and deadline:
+        try:
+            if date.fromisoformat(deadline) < date.today():
+                return 'Просрочено'
+        except ValueError:
+            pass
+    return TASK_STATES.get(task.get('status'), task.get('status', ''))
 
 
 def label(text, name='', wrap=False):
@@ -287,15 +298,18 @@ class Window(QMainWindow):
             self.health_data = data
             self.connection.setText('Backend подключён')
             mock = data.get('mock_mode', True)
-            self.banner.setText('ДЕМОРЕЖИМ BACKEND: результат обработки задан заранее и не является расшифровкой вашей записи.'
-                                if mock else 'Локальная обработка. Доступность моделей проверяется при запуске анализа.')
+            self.banner.setText('ДЕМО MOCK: результат не получен из аудио.'
+                                if mock else 'Локальная обработка · Данные не покидают устройство')
+            models = data.get('models', {})
             self.backend_info.setPlainText(
                 f'Адрес: {self.api.base}\nРежим: {"демонстрационный (MOCK_MODE)" if mock else "локальные модели"}\n'
                 f'Устройство: {data.get("device", "не указано")}\n\n'
                 'Фронтенд: Python / PySide6 (Qt)\nBackend: FastAPI / SQLite\n'
-                'API NVIDIA и другие облачные сервисы не используются.\n\n'
-                'Распознавание RU/KK и диаризация зависят от реализации backend. '
-                'В текущем репозитории реальные AI-провайдеры пока не реализованы.\n\n'
+                'Облачные API и телеметрия не используются.\n\n'
+                f'FFmpeg: {"готов" if data.get("ffmpeg") else "не найден"}\n'
+                f'Whisper: {"готов" if models.get("stt") else "модель не найдена"}\n'
+                f'Diarization: {"готова" if models.get("diarization") else "модель не найдена"}\n'
+                f'Локальная LLM: {"готова" if models.get("llm") else "модель не найдена"}\n\n'
                 f'Записи микрофона: {self.data_dir / "recordings"}\n'
                 'Файлы встреч и база данных: BACKEND/uploads и BACKEND/meeting_protocol.db.')
         def failed(message):
@@ -400,7 +414,7 @@ class Window(QMainWindow):
             self.all_tasks.setRowCount(len(rows))
             for row, (_meeting_id, task) in enumerate(rows):
                 values = [task['task'], task['responsible'], task['deadline_normalized'] or task['deadline_raw'] or 'Не указан',
-                          TASK_STATES.get(task['status'], task['status'])]
+                          task_state(task)]
                 for col, text in enumerate(values):
                     item = QTableWidgetItem(text)
                     item.setToolTip(text)
@@ -508,13 +522,13 @@ class Window(QMainWindow):
         self.tabs.addTab(self.transcript, 'Транскрипт')
         people_page = QWidget()
         people_layout = QVBoxLayout(people_page)
-        self.people = QTableWidget(0, 2)
-        self.people.setHorizontalHeaderLabels(['СПИКЕР', 'ИМЯ'])
+        self.people = QTableWidget(0, 3)
+        self.people.setHorizontalHeaderLabels(['СПИКЕР', 'ИМЯ', 'ДОЛЖНОСТЬ / РОЛЬ'])
         self.people.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.people.verticalHeader().hide()
         self.people.itemChanged.connect(self.person_changed)
         people_layout.addWidget(self.people)
-        people_layout.addWidget(label('Имя обновится в транскрипте. Ответственных в поручениях проверяйте отдельно.', 'muted', True))
+        people_layout.addWidget(label('Имя и роль обновятся в транскрипте; точные ссылки в поручениях обновятся автоматически.', 'muted', True))
         people_layout.addWidget(button('Сохранить изменения', self.save_changes, True, QStyle.StandardPixmap.SP_DialogSaveButton))
         self.tabs.addTab(people_page, 'Участники')
         self.task_text.textChanged.connect(self.task_changed)
@@ -569,6 +583,8 @@ class Window(QMainWindow):
         summary = meeting['summary']
         if summary:
             html = f'<h2>{escape(summary["topic"])}</h2>'
+            if summary.get('summary_text'):
+                html += f'<p>{escape(summary["summary_text"])}</p>'
             for name, key in [('Ключевые вопросы', 'key_points'), ('Проблемы', 'problems'), ('Решения', 'decisions')]:
                 html += f'<h3>{name}</h3><ul>' + ''.join(f'<li>{escape(item)}</li>' for item in summary[key]) + '</ul>'
             self.summary.setHtml(html)
@@ -576,7 +592,8 @@ class Window(QMainWindow):
             self.summary.setPlainText('Итог ещё не готов.')
         self.transcript.setRowCount(len(meeting['transcript']))
         for row, item in enumerate(meeting['transcript']):
-            for col, text in enumerate([item['text'], item['speaker_name'], timestamp(item['start'] * 1000)]):
+            speaker = item['speaker_name'] + (f' · {item["speaker_role"]}' if item.get('speaker_role') else '')
+            for col, text in enumerate([item['text'], speaker, timestamp(item['start'] * 1000)]):
                 cell = QTableWidgetItem(text)
                 cell.setToolTip(text)
                 self.transcript.setItem(row, col, cell)
@@ -588,6 +605,7 @@ class Window(QMainWindow):
             cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.people.setItem(row, 0, cell)
             self.people.setItem(row, 1, QTableWidgetItem(person['display_name']))
+            self.people.setItem(row, 2, QTableWidgetItem(person.get('role') or ''))
         self.people.blockSignals(False)
         self.update_dirty()
 
@@ -622,13 +640,17 @@ class Window(QMainWindow):
         self.update_dirty()
 
     def person_changed(self, item):
-        if item.column() != 1 or not self.meeting:
+        if item.column() not in {1, 2} or not self.meeting:
             return
         person = self.meeting['participants'][item.row()]
-        if item.text().strip() == person['display_name']:
+        values = {
+            'display_name': self.people.item(item.row(), 1).text().strip(),
+            'role': self.people.item(item.row(), 2).text().strip() or None,
+        }
+        if values['display_name'] == person['display_name'] and values['role'] == person.get('role'):
             self.people_drafts.pop(person['id'], None)
         else:
-            self.people_drafts[person['id']] = item.text().strip()
+            self.people_drafts[person['id']] = values
         self.update_dirty()
 
     def update_dirty(self):
@@ -649,7 +671,8 @@ class Window(QMainWindow):
                 except ValueError:
                     self.error('Укажите срок в формате ГГГГ-ММ-ДД или оставьте его пустым.')
                     return
-        if any(not name or len(name) > 240 for name in self.people_drafts.values()):
+        if any(not values['display_name'] or len(values['display_name']) > 240 or len(values.get('role') or '') > 300
+               for values in self.people_drafts.values()):
             self.error('Имя участника должно содержать от 1 до 240 символов.')
             return
         meeting_id = self.meeting['id']
@@ -662,8 +685,8 @@ class Window(QMainWindow):
         def work():
             for task_id, values in tasks.items():
                 self.api.task(meeting_id, task_id, values)
-            for person_id, name in people.items():
-                self.api.participant(meeting_id, person_id, name)
+            for person_id, values in people.items():
+                self.api.participant(meeting_id, person_id, values)
             return self.api.meeting(meeting_id)
         def received(data):
             self.meeting = data
@@ -682,17 +705,18 @@ class Window(QMainWindow):
         self.progress.setValue(data['progress'])
         self.progress.setVisible(state == 'processing')
         self.process_button.setEnabled(state != 'processing' and bool(self.meeting['source_filename']) and not self.saving)
-        self.process_button.setText('Повторить анализ' if state == 'completed' else 'Обработать запись')
+        self.process_button.setText('Повторить анализ' if state in {'completed', 'partial'} else 'Обработать запись')
         self.retry_upload.setVisible(not self.meeting['source_filename'])
-        self.pdf.setEnabled(state == 'completed')
-        self.docx.setEnabled(state == 'completed')
+        self.pdf.setEnabled(state in {'completed', 'partial'})
+        self.docx.setEnabled(state in {'completed', 'partial'})
         if data.get('error'):
-            self.process_label.setText('Ошибка: ' + data['error'])
+            prefix = 'Предупреждение: ' if state == 'partial' else 'Ошибка: '
+            self.process_label.setText(prefix + data['error'])
 
     def process(self):
         if not self.meeting or not self.can_leave():
             return
-        if self.meeting['status'] == 'completed':
+        if self.meeting['status'] in {'completed', 'partial'}:
             answer = QMessageBox.question(self, 'Повторный анализ',
                 'Повторный анализ заменит транскрипт, участников и все исправления поручений. Продолжить?',
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
@@ -724,7 +748,7 @@ class Window(QMainWindow):
             self.update_progress(data)
             if data['status'] != 'processing':
                 self.poll.stop()
-                if data['status'] == 'completed':
+                if data['status'] in {'completed', 'partial'}:
                     self.open_meeting(meeting_id)
                 else:
                     self.meeting['status'] = data['status']
