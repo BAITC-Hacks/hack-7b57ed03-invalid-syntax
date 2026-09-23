@@ -22,3 +22,6 @@ BACKEND/models/*/*
 # Local settings
 .env
 .DS_Store
+FRONT/.desktop-env/
+FRONT/.desktop-data/
+FRONT/python/__pycache__/

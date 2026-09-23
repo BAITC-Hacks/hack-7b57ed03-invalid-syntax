@@ -45,7 +45,9 @@ class ExportService:
     def pdf(self, meeting: Meeting) -> bytes:
         output = io.BytesIO()
         font_name = "Helvetica"
-        for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "C:/Windows/Fonts/arial.ttf"):
+        for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                     "/System/Library/Fonts/Supplemental/Arial.ttf",
+                     "C:/Windows/Fonts/arial.ttf"):
             try:
                 pdfmetrics.registerFont(TTFont("ProtocolFont", path))
                 font_name = "ProtocolFont"
@@ -63,4 +65,3 @@ class ExportService:
             story.append(Spacer(1, 10))
         SimpleDocTemplate(output, pagesize=A4).build(story)
         return output.getvalue()
-

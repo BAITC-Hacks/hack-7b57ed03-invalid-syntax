@@ -3,6 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -95,6 +96,17 @@ def meeting_status(meeting_id: int, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/{meeting_id}/media")
+def meeting_media(meeting_id: int, db: Session = Depends(get_db)):
+    meeting = get_meeting_or_404(db, meeting_id)
+    if not meeting.source_path:
+        raise HTTPException(status_code=404, detail="Media is not uploaded")
+    path = Path(meeting.source_path).resolve()
+    if not path.is_relative_to(settings.upload_dir.resolve()) or not path.is_file():
+        raise HTTPException(status_code=404, detail="Media not found")
+    return FileResponse(path)
+
+
 @router.get("/{meeting_id}", response_model=MeetingRead)
 def get_meeting(meeting_id: int, db: Session = Depends(get_db)):
     meeting = get_meeting_or_404(db, meeting_id, relations=True)
@@ -115,4 +127,3 @@ def get_summary(meeting_id: int, db: Session = Depends(get_db)):
     if result is None:
         raise HTTPException(status_code=404, detail="Summary is not ready")
     return result
-
