@@ -37,5 +37,16 @@ app.include_router(export.router, prefix=settings.api_prefix)
 
 @app.get("/health", tags=["system"])
 def health():
-    return {"status": "ok", "mock_mode": settings.mock_mode}
+    models_root = settings.upload_dir.parent / "models"
+    return {
+        "status": "ok",
+        "offline": True,
+        "mock_mode": settings.mock_mode,
+        "device": settings.device,
+        "models": {
+            "stt": (models_root / "whisper").exists(),
+            "diarization": (models_root / "diarization").exists(),
+            "llm": (models_root / "llm").exists(),
+        },
+    }
 

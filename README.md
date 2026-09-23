@@ -1,129 +1,81 @@
-# Aqylman Meeting Protocol
+# Aqylman — офлайн-протоколы совещаний
 
-Локально разворачиваемый MVP для загрузки записи совещания, построения транскрипта, выделения поручений и экспорта протокола. `FRONT` обращается к `BACKEND` только через REST API.
+Рабочий foundation для desktop-приложения, которое хранит записи и результаты только на локальном компьютере. Никаких cloud API, CDN, телеметрии или загрузки моделей во время запуска нет.
 
-## Быстрый запуск
+## Структура
 
-```bash
-docker compose up --build
+```text
+PROJECT/
+├── FRONT/                 React + TypeScript + Vite + Tauri
+│   ├── src/               dashboard, upload, progress, result tabs
+│   └── src-tauri/         Windows desktop shell
+├── BACKEND/               Python/FastAPI/local AI boundary
+│   ├── app/api/           REST endpoints
+│   ├── app/models/        SQLAlchemy SQLite models
+│   ├── app/schemas/       Pydantic API contract
+│   ├── app/services/      use cases and export
+│   ├── app/ai/            provider contracts and pipeline
+│   ├── uploads/ exports/  local mutable files
+│   └── models/            put local whisper/diarization/llm models here
+├── README.md
+└── .gitignore
 ```
 
-- UI: http://localhost:3000
-- Swagger: http://localhost:8000/docs
+## Architecture and data flow
 
-Без Docker:
+```text
+Vite/Tauri UI → http://127.0.0.1:8000 → FastAPI → SQLite/local files
+file → audio → STT → diarization → speaker mapping → tasks → deadlines
+     → summary → database → UI / local DOCX / local PDF
+```
 
-```bash
+The UI never touches models; model adapters are behind `BACKEND/app/ai/contracts.py`. `MOCK_MODE=true` is explicitly a deterministic demo provider. Upload, validation, persistence, progress polling, editing, DOCX and PDF are real local functionality.
+
+## Run in development
+
+```powershell
 cd BACKEND
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --port 8000
+```
 
-cd ../FRONT
-copy .env.example .env.local
+In a second terminal:
+
+```powershell
+cd FRONT
 npm install
 npm run dev
 ```
 
-По умолчанию включён `MOCK_MODE=true`: тяжёлые модели не нужны, но весь путь от загрузки до результата и экспорта работает.
+Open `http://127.0.0.1:5173`. For a desktop build, install Rust/Tauri prerequisites once and run `npm run tauri dev` from `FRONT`.
 
-## Дерево проекта
+`MOCK_MODE` defaults to `true`. Set `MOCK_MODE=false` in `BACKEND/.env` only after local providers and model paths have been implemented/configured. Place models under `BACKEND/models/whisper`, `BACKEND/models/diarization`, and `BACKEND/models/llm`; the app never downloads them.
 
-```text
-project/
-├── FRONT/
-│   ├── app/                 # dashboard, upload, processing, result
-│   ├── components/          # общие UI-компоненты
-│   ├── features/            # пользовательские сценарии
-│   ├── hooks/  lib/  services/  types/
-│   └── public/
-├── BACKEND/
-│   ├── app/
-│   │   ├── api/  core/  models/  schemas/
-│   │   ├── repositories/  services/
-│   │   ├── ai/
-│   │   │   ├── audio/  stt/  diarization/
-│   │   │   ├── speaker_mapping/  task_extraction/
-│   │   │   ├── deadline_parser/  summarization/
-│   │   │   ├── pipelines/  providers/
-│   │   │   └── contracts.py
-│   │   ├── workers/  utils/
-│   │   └── main.py
-│   ├── tests/  uploads/  exports/
-│   └── requirements.txt
-├── README.md
-├── docker-compose.yml
-└── .gitignore
-```
+## REST contract
 
-## Архитектура
-
-FRONT: Next.js App Router отвечает за маршрутизацию, интерактивная логика вынесена в `features`. Все HTTP-вызовы централизованы в `services/api.ts`; UI не знает о БД, Python или AI-моделях. Статус pipeline опрашивается hook-ом, после завершения автоматически открывается результат.
-
-BACKEND:
-
-- `api` валидирует HTTP-ввод и отдаёт DTO;
-- `services` реализует use cases;
-- `repositories` изолирует SQLAlchemy;
-- `models` хранит совещания, участников, реплики, поручения и summary;
-- `ai/contracts.py` задаёт заменяемые STT/diarization/extraction/summary интерфейсы;
-- `MeetingProcessingPipeline` оркестрирует этапы и публикует прогресс;
-- `providers/mock.py` даёт результат без внешних сервисов;
-- `export_service.py` формирует PDF/DOCX.
-
-Поток данных:
-
-```text
-Browser -> REST API -> SQLite / uploads
-                     -> validate -> audio -> STT -> diarization
-                     -> merge -> mapping -> tasks -> deadlines
-                     -> summary -> persistence -> PDF/DOCX
-                     -> Browser
-```
-
-## REST API contract
-
-| Method | Path | Назначение |
+| Method | Endpoint | Purpose |
 |---|---|---|
-| `GET/POST` | `/api/v1/meetings` | список / создание |
-| `POST` | `/api/v1/meetings/{id}/upload` | загрузка media |
-| `POST` | `/api/v1/meetings/{id}/process` | запуск pipeline |
-| `GET` | `/api/v1/meetings/{id}/status` | stage и progress |
-| `GET` | `/api/v1/meetings/{id}` | полный результат |
-| `GET` | `/api/v1/meetings/{id}/transcript` | транскрипт |
-| `GET/PATCH` | `/api/v1/meetings/{id}/tasks[/{task_id}]` | поручения |
-| `GET` | `/api/v1/meetings/{id}/summary` | summary |
-| `GET/PATCH` | `/api/v1/meetings/{id}/participants[/{participant_id}]` | участники |
-| `GET` | `/api/v1/meetings/{id}/export/pdf` | PDF |
-| `GET` | `/api/v1/meetings/{id}/export/docx` | DOCX |
+| GET/POST | `/api/v1/meetings` | list/create meeting |
+| POST | `/api/v1/meetings/{id}/upload` | local media upload |
+| POST | `/api/v1/meetings/{id}/process` | start pipeline |
+| GET | `/api/v1/meetings/{id}/status` | `status`, `stage`, `progress` |
+| GET | `/api/v1/meetings/{id}` | result: transcript/tasks/participants/summary |
+| PATCH | `/api/v1/meetings/{id}/participants/{participant_id}` | rename speaker |
+| PATCH | `/api/v1/meetings/{id}/tasks/{task_id}` | edit task |
+| GET | `/api/v1/meetings/{id}/export/{pdf|docx}` | local protocol export |
+| GET | `/health` | offline startup health |
 
-```json
-{"meeting_id": 1, "status": "processing", "stage": "task_extraction", "progress": 75, "error": null}
-```
+SQLite entities: `meetings`, `participants`, `transcript_segments`, `tasks`, and `summaries`, connected by meeting foreign keys.
 
-## Что работает сейчас
+## Offline audit
 
-- dashboard, drag-and-drop загрузка, экран прогресса и результат;
-- SQLite, streaming upload с проверкой типа/лимита и background pipeline;
-- транскрипт, участники, summary и поручения;
-- ручная коррекция участников и поручений;
-- PDF/DOCX, CORS, Docker Compose и интеграционный API-тест.
+**OFFLINE AUDIT PASSED (foundation).** Runtime requests are limited to the local FastAPI address. No external URLs, client fonts, analytics, cloud database, provider SDK calls, or model download code are present. `requests`/`httpx` are test/development dependencies only, not used by application runtime. The real-model adapters are intentionally not yet implemented; they must only open local files/process local binaries.
 
-В `MOCK_MODE` этапы STT, diarization, mapping, task extraction и summary возвращают детерминированный пример. Загрузка, БД, API, прогресс, редактирование и экспорт при этом настоящие.
+## Next implementation steps
 
-## Границы команд
-
-- Developer 1: `FRONT/`
-- Developer 2: `BACKEND/app/api`, `services`, `models`, `schemas`, `repositories`
-- Developer 3: `BACKEND/app/ai`
-
-## Следующие этапы
-
-1. faster-whisper с RU/KZ auto-detect.
-2. pyannote.audio и локальный model cache.
-3. ffmpeg preprocessing и извлечение WAV из видео.
-4. Локальная LLM для multi-turn extraction/summary со строгой JSON schema.
-5. Полная нормализация русских/казахских сроков и timezone.
-6. Redis + Celery/RQ вместо in-process background task.
-7. Alembic, PostgreSQL, авторизация, аудит и object storage для production/on-premise.
+1. Add a locally-installed ffmpeg adapter and real faster-whisper provider.
+2. Add a local diarization adapter and merge strategy.
+3. Add a local GGUF/llama.cpp structured extraction provider.
+4. Bundle the Python backend and pre-provisioned models with the Tauri installer.

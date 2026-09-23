@@ -9,10 +9,11 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     mock_mode: bool = True
     database_url: str = "sqlite:///./meeting_protocol.db"
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     upload_dir: Path = Path("uploads")
     export_dir: Path = Path("exports")
     max_upload_mb: int = 500
+    device: str = "auto"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

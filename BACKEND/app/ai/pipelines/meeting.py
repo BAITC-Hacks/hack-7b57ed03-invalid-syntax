@@ -17,7 +17,10 @@ class MeetingProcessingPipeline:
 
     def __init__(self, progress: ProgressCallback, provider: MockAIProvider | None = None):
         if not settings.mock_mode and provider is None:
-            raise RuntimeError("Real AI providers are not configured. Enable MOCK_MODE or register providers.")
+            raise RuntimeError(
+                "Локальная модель распознавания речи не найдена. "
+                "Проверьте папку BACKEND/models/whisper или включите MOCK_MODE=true."
+            )
         self.progress = progress
         self.provider = provider or MockAIProvider()
 

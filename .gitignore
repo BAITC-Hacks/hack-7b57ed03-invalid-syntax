@@ -13,6 +13,11 @@ BACKEND/exports/*
 FRONT/node_modules/
 FRONT/.next/
 FRONT/out/
+FRONT/dist/
+
+# Provisioned local AI models must never be committed or downloaded at runtime
+BACKEND/models/*/*
+!BACKEND/models/*/.gitkeep
 
 # Local settings
 .env
