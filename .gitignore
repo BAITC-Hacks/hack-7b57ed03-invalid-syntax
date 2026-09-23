@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+BACKEND/*.db
+BACKEND/uploads/*
+!BACKEND/uploads/.gitkeep
+BACKEND/exports/*
+!BACKEND/exports/.gitkeep
+
+# Node
+FRONT/node_modules/
+FRONT/.next/
+FRONT/out/
+
+# Local settings
+.env
+.DS_Store
